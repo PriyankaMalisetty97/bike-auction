@@ -2,10 +2,17 @@
 
 Live bidding on used motorcycles. FastAPI + SQLAlchemy + WebSockets backend, React frontend served by the same app.
 
-**Live URL:** `<add after deploy>`
-**Demo logins:** admin `admin@vutto.test` / `Admin@12345` · buyer `buyer@vutto.test` / `Buyer@12345`
+**Live URL:** https://bike-auction-68ej.onrender.com
+
+*Hosted on Render's free tier, so the first load after inactivity can take about 30 seconds.*
+
+**Demo logins**
+
+- Admin: `admin@vutto.test` / `Vutto@Admin2026`
+- Buyer: `buyer@vutto.test` / `Buyer@12345`
 
 ## Run locally
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
