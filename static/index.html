@@ -1,0 +1,102 @@
+﻿<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bike Auctions</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#14181f;--mut:#6b7280;--pri:#e8590c;--bd:#e5e7eb}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#181b22;--tx:#f1f3f5;--mut:#9ca3af;--bd:#2a2e38}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:var(--card);border-bottom:1px solid var(--bd)}
+header b{font-size:18px;cursor:pointer}main{max-width:1000px;margin:24px auto;padding:0 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px}
+.card.click{cursor:pointer}.card.click:hover{border-color:var(--pri)}
+.price{font-size:24px;font-weight:700}.mut{color:var(--mut);font-size:13px}
+.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--bd)}.tag.live{background:#16a34a;color:#fff}
+button{background:var(--pri);color:#fff;border:0;border-radius:8px;padding:9px 16px;font-size:14px;cursor:pointer}
+button.ghost{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+input{width:100%;padding:9px;margin:4px 0 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx)}
+.err{color:#dc2626;margin:6px 0}.row{display:flex;gap:8px;align-items:center}
+</style></head><body><div id="root"></div>
+<script src="/static/vendor/react.js"></script>
+<script src="/static/vendor/react-dom.js"></script>
+<script src="/static/vendor/htm.js"></script>
+<script>
+const {useState,useEffect}=React, html=htm.bind(React.createElement);
+const inr=n=>'\u20B9'+Number(n).toLocaleString('en-IN');
+async function api(path,opt={},tok){
+  const r=await fetch('/api'+path,{...opt,headers:{'Content-Type':'application/json',...(tok?{Authorization:'Bearer '+tok}:{})}});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(typeof d.detail==='string'?d.detail:'Please check your input');
+  return d;
+}
+function useCountdown(iso){
+  const [t,setT]=useState(0);
+  useEffect(()=>{const f=()=>setT(Math.max(0,new Date(iso)-Date.now()));f();const i=setInterval(f,1000);return()=>clearInterval(i)},[iso]);
+  const s=Math.floor(t/1000);return `${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m ${s%60}s`;
+}
+function Auth({onAuth}){
+  const [mode,setMode]=useState('login'),[email,setEmail]=useState(''),[pw,setPw]=useState(''),[err,setErr]=useState('');
+  const go=async()=>{try{setErr('');const d=await api('/auth/'+mode,{method:'POST',body:JSON.stringify({email,password:pw})});onAuth(d.token)}catch(e){setErr(e.message)}};
+  return html`<div class="card" style=${{maxWidth:'380px',margin:'40px auto'}}><h2>${mode==='login'?'Sign in':'Create account'}</h2>
+    <input placeholder="Email" value=${email} onInput=${e=>setEmail(e.target.value)}/>
+    <input type="password" placeholder="Password (min 8 chars)" value=${pw} onInput=${e=>setPw(e.target.value)}/>
+    ${err&&html`<div class="err">${err}</div>`}
+    <div class="row"><button onClick=${go}>${mode==='login'?'Sign in':'Register'}</button>
+    <button class="ghost" onClick=${()=>setMode(mode==='login'?'register':'login')}>${mode==='login'?'New here?':'Have an account?'}</button></div></div>`;
+}
+function List({open}){
+  const [items,setItems]=useState(null);
+  useEffect(()=>{api('/auctions').then(setItems)},[]);
+  if(!items)return html`<p>Loading...</p>`;
+  return html`<div class="grid">${items.map(a=>html`<div class="card click" key=${a.id} onClick=${()=>open(a.id)}>
+    <span class=${'tag '+a.status}>${a.status}</span><h3>${a.title}</h3>
+    <div class="price">${inr(a.current_price)}</div><div class="mut">${a.bid_count} bids</div></div>`)}</div>`;
+}
+function Detail({id,tok}){
+  const [a,setA]=useState(null),[amt,setAmt]=useState(''),[msg,setMsg]=useState('');
+  const load=()=>api('/auctions/'+id).then(setA);
+  useEffect(()=>{
+    load();let ws,retry;
+    const connect=()=>{ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/auctions/'+id);
+      ws.onmessage=()=>load();ws.onclose=()=>{retry=setTimeout(connect,2000)};};
+    connect();const ping=setInterval(()=>ws.readyState===1&&ws.send('ping'),25000);
+    return()=>{clearTimeout(retry);clearInterval(ping);ws.onclose=null;ws.close()};
+  },[id]);
+  const left=useCountdown(a?a.ends_at:new Date().toISOString());
+  if(!a)return html`<p>Loading...</p>`;
+  const min=a.bid_count?a.current_price+a.min_increment:a.start_price;
+  const bid=async()=>{try{setMsg('');await api(`/auctions/${id}/bids`,{method:'POST',body:JSON.stringify({amount:Number(amt)})},tok);setAmt('')}catch(e){setMsg(e.message)}};
+  return html`<div class="card"><span class=${'tag '+a.status}>${a.status}</span><h2>${a.title}</h2><p>${a.description}</p>
+    <div class="price">${inr(a.current_price)}</div>
+    <div class="mut">${a.status==='live'?'Ends in '+left:'Auction '+a.status}${' \u00B7 '}${a.bid_count} bids</div>
+    ${a.status==='live'&&html`<div class="row" style=${{marginTop:'14px'}}><input style=${{margin:0}} type="number" placeholder=${'Min '+inr(min)} value=${amt} onInput=${e=>setAmt(e.target.value)}/>
+      <button onClick=${bid}>Place bid</button></div>`}
+    ${msg&&html`<div class="err">${msg}</div>`}
+    <h4>Recent bids</h4>${a.bids.map((b,i)=>html`<div class="row mut" key=${i}><b>${inr(b.amount)}</b> ${b.bidder}</div>`)}</div>`;
+}
+function Admin({tok,done}){
+  const [f,setF]=useState({title:'',description:'',start_price:'',min_increment:'1000',starts_at:'',ends_at:''}),[err,setErr]=useState('');
+  const set=k=>e=>setF({...f,[k]:e.target.value});
+  const go=async()=>{try{setErr('');await api('/auctions',{method:'POST',body:JSON.stringify({...f,start_price:+f.start_price,min_increment:+f.min_increment,
+    starts_at:new Date(f.starts_at).toISOString(),ends_at:new Date(f.ends_at).toISOString()})},tok);done()}catch(e){setErr(e.message)}};
+  return html`<div class="card" style=${{maxWidth:'480px'}}><h2>New auction</h2>
+    <input placeholder="Title" onInput=${set('title')}/><input placeholder="Description" onInput=${set('description')}/>
+    <input type="number" placeholder="Start price" onInput=${set('start_price')}/><input type="number" placeholder="Min increment" value=${f.min_increment} onInput=${set('min_increment')}/>
+    <label class="mut">Starts</label><input type="datetime-local" onInput=${set('starts_at')}/>
+    <label class="mut">Ends</label><input type="datetime-local" onInput=${set('ends_at')}/>
+    ${err&&html`<div class="err">${err}</div>`}<button onClick=${go}>Create</button></div>`;
+}
+function App(){
+  const [tok,setTok]=useState(localStorage.tok||''),[me,setMe]=useState(null),[view,setView]=useState({p:'list'});
+  useEffect(()=>{tok?api('/auth/me',{},tok).then(setMe).catch(()=>{localStorage.tok='';setTok('')}):setMe(null)},[tok]);
+  const out=()=>{localStorage.tok='';setTok('')};
+  return html`<div><header><b onClick=${()=>setView({p:'list'})}>Bike Auctions</b>
+    <div class="row">${me&&me.role==='admin'&&html`<button class="ghost" onClick=${()=>setView({p:'admin'})}>+ Auction</button>`}
+    ${tok?html`<span class="mut">${me&&me.email}</span><button class="ghost" onClick=${out}>Sign out</button>`:''}</div></header>
+    <main>${!tok?html`<${Auth} onAuth=${t=>{localStorage.tok=t;setTok(t)}}/>`:
+      view.p==='detail'?html`<${Detail} id=${view.id} tok=${tok}/>`:
+      view.p==='admin'?html`<${Admin} tok=${tok} done=${()=>setView({p:'list'})}/>`:
+      html`<${List} open=${id=>setView({p:'detail',id})}/>`}</main></div>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script></body></html>
